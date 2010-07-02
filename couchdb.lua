@@ -12,6 +12,7 @@ config.port = 5984
 config.debug = false
 
 local couchdb_request
+local to_json
 
 function couchdb_request(request)
     -- ensure methode
@@ -33,7 +34,7 @@ function couchdb_request(request)
 
     -- POST body
     if request.body ~= nil then
-        local data = json.encode(request.body)
+        local data = to_json(request.body)
         param.source = ltn12.source.string(data)
         param.headers["Content-Length"] = string.len(data)
         param.headers["Content-Type"]   = "application/json"
@@ -45,6 +46,7 @@ function couchdb_request(request)
     -- debug
     if config.debug then
         base.print('#### ' .. request.methode .. ' ' .. request.path .. ' ####')
+        if request.body ~= nil then base.print("body = " .. to_json(request.body) .. "\n") end
         base.print('code = ' .. code)
         base.print(table.concat(t))
     end
@@ -55,6 +57,11 @@ function couchdb_request(request)
     end
 
     return json.decode(table.concat(t))
+end
+
+function to_json(text)
+    -- fix quote escaping problem
+    return string.gsub(json.encode(text), "\\'", "'")
 end
 
 function get_all_databases()
@@ -118,10 +125,19 @@ function get_document_revs(db, name)
     return get_document(db, name .. '?revs=true')
 end
 
+function get_document_by_attribute(db, attribute, value)
+    base.assert(db and attribute and value, 'parameter is missing')
 
-
-
-
-
-
+    local response =  couchdb_request({
+        path = db .. '/_temp_view',
+        methode = 'POST',
+        body = { map = "function(doc) { if (doc." .. attribute .. "=='" .. value ..
+            "') { emit(null, doc); }}" }
+    })
+    local docs = {}
+    for k, v in base.ipairs(response.rows) do
+        table.insert(docs, v.value)
+    end
+    return docs
+end
 
