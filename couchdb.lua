@@ -13,6 +13,9 @@ config.debug = false
 
 local couchdb_request
 local to_json
+local get_documents_by_condition
+local get_documents_by_filter
+local make_condition
 
 function couchdb_request(request)
     -- ensure methode
@@ -57,11 +60,6 @@ function couchdb_request(request)
     end
 
     return json.decode(table.concat(t))
-end
-
-function to_json(text)
-    -- fix quote escaping problem
-    return string.gsub(json.encode(text), "\\'", "'")
 end
 
 function get_all_databases()
@@ -125,19 +123,70 @@ function get_document_revs(db, name)
     return get_document(db, name .. '?revs=true')
 end
 
-function get_document_by_attribute(db, attribute, value)
+function get_documents_by_attribute(db, attribute, value)
     base.assert(db and attribute and value, 'parameter is missing')
 
+    return get_documents_by_condition(db, "doc." .. attribute .. "=='" .. value ..  "'")
+end
+
+function get_documents_by_filter_or(db, attributes)
+    return get_documents_by_filter(db, attributes, ' || ')
+end
+
+function get_documents_by_filter_and(db, attributes)
+    return get_documents_by_filter(db, attributes, ' && ')
+end
+
+-- private functions ------------------------------------------------------------------------------
+
+-- convert object to JSON
+function to_json(text)
+    -- fix quote escaping problem
+    return string.gsub(json.encode(text), "\\'", "'")
+end
+
+-- get documents by attributes and connect them by condition
+function get_documents_by_filter(db, attributes, condition)
+    base.assert(db and condition and base.type(attributes) == "table", 'parameter is wrong or missing')
+
+    local query = nil
+    for k, v in base.pairs(attributes) do
+        if query then
+            -- ectend
+            query = query .. condition .. make_condition(k, v)
+        else
+            -- first time
+            query = make_condition(k, v)
+        end
+    end
+
+    return get_documents_by_condition(db, query)
+end
+
+-- create javascript compare
+function make_condition(key, value)
+    return 'doc.' .. key .. "=='" .. value .. "'"
+end
+
+-- return documents by given condition
+function get_documents_by_condition(db, condition)
+    -- check
+    base.assert(db and condition, 'parameter is wrong or missing')
+
+    -- create request and response
     local response =  couchdb_request({
         path = db .. '/_temp_view',
         methode = 'POST',
-        body = { map = "function(doc) { if (doc." .. attribute .. "=='" .. value ..
-            "') { emit(null, doc); }}" }
+        body = { map = "function(doc) { if (" .. condition ..  ") { emit(null, doc); }}" }
     })
+
+    -- map documents
     local docs = {}
     for k, v in base.ipairs(response.rows) do
         table.insert(docs, v.value)
     end
+
+    -- and return
     return docs
 end
 
